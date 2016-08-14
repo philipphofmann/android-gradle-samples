@@ -1,0 +1,107 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven'
+
+//Your android configuration
+android {
+    //...
+}
+
+//maven repository info
+group = 'com.example'
+version = '1.0.0'
+
+
+ext {
+    mavenPrePublishUrl = 'maven-temp'
+}
+
+configurations {
+    deployerJars
+}
+
+dependencies {
+    deployerJars "org.apache.maven.wagon:wagon-ftp:2.10"
+}
+
+// custom tasks for creating source/javadoc jars
+task javadoc(type: Javadoc) {
+    source = android.sourceSets.main.java.srcDirs
+    classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
+    destinationDir = file("../javadoc/")
+    failOnError false
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+//Creating sources with comments
+task androidSourcesJar(type: Jar) {
+    classifier = 'sources'
+    from android.sourceSets.main.java.srcDirs
+}
+
+//Put the androidSources and javadoc to the artifacts
+artifacts {
+    archives androidSourcesJar
+    archives javadocJar
+}
+
+//you can specify a url via the command line like 'gradlew uploadArchives -PmavenUrl=ftp://your.maven.repo.com/maven2'
+if (hasProperty('mavenUrl')) {
+    repositoryUrl = mavenUrl
+}
+
+//this is used for continous integration
+if (hasProperty('mavenPublish')) {
+    repositoryUrl = 'file:' + mavenPrePublishUrl
+}
+
+//you can specify a url via the command line like 'gradlew uploadArchives -PmavenVersionSuffix=beta0'
+if (hasProperty('mavenVersionSuffix')) {
+    version = version + '-' + getDate() + mavenVersionSuffix
+}
+
+def getDate() {
+    def date = new Date()
+    def formattedDate = date.format('yyyyMMddHHmmss')
+    return formattedDate
+}
+
+//Upload the artifacts to local maven repository
+println 'Uploading Archives to: ' + repositoryUrl + ' version: ' + version
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            configuration = configurations.deployerJars
+            repository(url: repositoryUrl) {
+                authentication(userName: "username", password: "password")
+            }
+        }
+    }
+}
+
+task removeVersionInfoFromArchives(type: Copy) {
+    description 'removes the version info of the archive files'
+
+    def groupAsPath = project.getGroup().toString().replace('.', '/')
+
+    from '../' + mavenPrePublishUrl + '/' + groupAsPath + '/' + project.getName() + '/' + version
+    into '../maven-artifacts/' + groupAsPath + '/' + project.getName()
+
+    // Use a closure to map the file name
+    rename { String fileName ->
+        fileName.replace(project.getName()  + '-' + version, 'library')
+    }
+
+    // Use a regular expression to map the file name
+    rename '(.+)-' + version + '(.+)', '$1$2'
+    rename(/(.+)-/ + version + /(.+)/, '$1$2')
+}
+
+uploadArchives.finalizedBy removeVersionInfoFromArchives
+
+
+
